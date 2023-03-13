@@ -9,7 +9,7 @@ from botocore.exceptions import ClientError
 import random
 
 # Specify the number of s3 buckets to be provisioned. Default value is 10.
-NUM_OF_BUCKET = 1
+NUM_OF_BUCKET = 20
 bucket_name_list = []
 REGION = "us-east-1"
 PII_DATA_FILE = "mock-up-pii-data-500.csv"
@@ -66,9 +66,56 @@ def s3_upload_pii_data(bucket_name, file_name):
         return False
     return True
 
+# Store S3 bucket list into DynamoDB table for later usage, e.g. deletion of those S3 buckets
+def store_s3_list_to_ddb(bucket_list):
+    dynamodb = boto3.client('dynamodb')
+    table_name = 's3-bucket-list-record-table'
 
-# Main function part. 
-#
+    try:
+        dynamodb.create_table(
+            AttributeDefinitions=[
+                {
+                    'AttributeName': 'bucket_name',
+                    'AttributeType': 'S'
+                }
+            ],
+            TableName=table_name,
+            KeySchema=[
+                {
+                    'AttributeName': 'bucket_name',
+                    'KeyType': 'HASH'
+                }
+            ],
+            ProvisionedThroughput={
+                'ReadCapacityUnits': 5,
+                'WriteCapacityUnits': 5
+            }
+        )
+    except ClientError as e:
+        logging.error(e)
+        return False
+    print("created DDB table: " + table_name)
+
+    # Wait for the table to be created before continuing
+    dynamodb.get_waiter('table_exists').wait(TableName=table_name)
+
+    # Store a list of S3 bucket names in the table
+    print(bucket_name_list)
+    for bucket_name in bucket_name_list:
+        dynamodb.put_item(
+            TableName=table_name,
+            Item={
+                'bucket_name': {'S': bucket_name}
+            }
+        )
+    print("DynamoDB table has been created to store S3 bucket name list.")
+
+    return True
+
+
+###################################################################################
+# Main function part
+###################################################################################
 # Provision the s3 buckets
 for i in range(NUM_OF_BUCKET):
     bucket_name = "my-pii-data-bucket-" + str(random.randint(1000000000, 9999999999))
@@ -80,12 +127,7 @@ for bucket_name in bucket_name_list:
     s3_upload_pii_data(bucket_name, "mock-up-pii-data-500.csv")
     print("PII data has been uploaded in s3 bucket: " + bucket_name )
     
+# Create a DDB table to store the S3 bucket names just created
+store_s3_list_to_ddb(bucket_name_list)
 
     
-
-
-
-
-
-
-
